@@ -114,5 +114,17 @@ Session identifiers are long, random, and unguessable, preventing brute‑force 
 Mitigation: Idle Timeout + Absolute Timeout  
 Sessions expire after inactivity and after a maximum lifetime, reducing exposure from abandoned or forgotten sessions.
 
+1. Cookie Theft via XSS
+Mitigation: HttpOnly Cookies  
+Marking cookies as HttpOnly: true prevents JavaScript from reading them, blocking attackers from stealing session identifiers through injected scripts.
 
+2. Cookie Interception on the Network
+Mitigation: Secure Cookies  
+Setting Secure: true ensures cookies are only transmitted over HTTPS, preventing exposure to network sniffing or man‑in‑the‑middle interception.
 
+3. Cross‑Site Request Forgery (CSRF)
+Mitigation: SameSite=Lax  
+SameSite: 'lax' stops browsers from sending cookies on most cross‑site requests, significantly reducing CSRF risk while still allowing top‑level navigation flows (e.g., OAuth redirects).
+
+Future Direction: Migration from Azure AD B2C to Entra External ID
+Azure AD B2C is now in a long‑term maintenance posture, and Microsoft’s strategic direction is Entra External ID. A future migration is therefore expected for support and lifecycle reasons. From a security perspective, Entra enables Proof‑of‑Possession (PoP) / Demonstration‑of‑Proof‑of‑Possession (DPoP) tokens, which bind tokens to the client and prevent replay attacks. While token interception is already extremely unlikely in a corporate environment—typically only possible through significant human error or compromised devices—PoP/DPoP closes that final theoretical gap and brings the model to full modern standards.
