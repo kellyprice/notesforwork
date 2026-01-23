@@ -1,0 +1,1 @@
+MSAL‑Node is Microsoft’s official authentication library for Node.js  applications, giving server‑side code a standard way to interact with Azure Active Directory and perform modern authentication flows to obtain the tokens needed for secure, identity‑aware communication with protected services.
