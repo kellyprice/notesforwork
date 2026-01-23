@@ -1,1 +1,24 @@
 MSAL‑Node is Microsoft’s official authentication library for Node.js  applications, giving server‑side code a standard way to interact with Azure Active Directory and perform modern authentication flows to obtain the tokens needed for secure, identity‑aware communication with protected services.
+
+Keeps tokens and authentication state on the server, reducing exposure to client‑side risks
+
+Uses secure, server‑side OAuth flows rather than the browser‑focused patterns required by msal.js
+
+Avoids storing tokens in browser storage, removing a common security vulnerability
+
+Centralises session and token lifecycle management in a controlled, trusted environment
+
+Simplifies integration with SSR and BFF architectures where the server is responsible for identity handling
+
+Handles key security patterns internally — such as nonce generation, PKCE, state validation, and token integrity checks — so these safeguards are applied consistently and correctly without custom implementation
+
+MSAL‑Node uses Microsoft‑maintained protocol compliance, ensuring its request/response handling stays aligned with Azure AD’s evolving standards
+
+It abstracts the underlying OAuth/OpenID Connect mechanics so your application doesn’t need to implement low‑level protocol details
+
+It provides a consistent interface across different authentication flows (confidential client, on‑behalf‑of, etc.), reducing variation in how different parts of the system authenticate
+
+It standardises error handling and token validation paths, so authentication behaviour is predictable across environments
+
+Server‑side state management in an authentication context means the server holds and tracks all identity‑related state — such as sessions, tokens, and token lifecycles — rather than pushing that responsibility into the browser. The server becomes the authority that stores, refreshes, and validates tokens, while the client simply receives authenticated responses without ever handling or persisting sensitive authentication data itself.
+
