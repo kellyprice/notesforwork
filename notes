@@ -1,24 +1,76 @@
 MSAL‑Node is Microsoft’s official authentication library for Node.js  applications, giving server‑side code a standard way to interact with Azure Active Directory and perform modern authentication flows to obtain the tokens needed for secure, identity‑aware communication with protected services.
 
-Keeps tokens and authentication state on the server, reducing exposure to client‑side risks
+- Keeps tokens and authentication state on the server, reducing exposure to client‑side risks
 
-Uses secure, server‑side OAuth flows rather than the browser‑focused patterns required by msal.js
+- Uses secure, server‑side OAuth flows rather than the browser‑focused patterns required by msal.js
 
-Avoids storing tokens in browser storage, removing a common security vulnerability
+- Avoids storing tokens in browser storage, removing a common security vulnerability
 
-Centralises session and token lifecycle management in a controlled, trusted environment
+- Centralises session and token lifecycle management in a controlled, trusted environment
 
-Simplifies integration with SSR and BFF architectures where the server is responsible for identity handling
+- Simplifies integration with SSR and BFF architectures where the server is responsible for identity handling
 
-Handles key security patterns internally — such as nonce generation, PKCE, state validation, and token integrity checks — so these safeguards are applied consistently and correctly without custom implementation
+- Handles key security patterns internally — such as nonce generation, PKCE, state validation, and token integrity checks — so these safeguards are applied consistently and correctly without custom implementation
 
-MSAL‑Node uses Microsoft‑maintained protocol compliance, ensuring its request/response handling stays aligned with Azure AD’s evolving standards
+- MSAL‑Node uses Microsoft‑maintained protocol compliance, ensuring its request/response handling stays aligned with Azure AD’s evolving standards
 
-It abstracts the underlying OAuth/OpenID Connect mechanics so your application doesn’t need to implement low‑level protocol details
+- It abstracts the underlying OAuth/OpenID Connect mechanics so your application doesn’t need to implement low‑level protocol details
 
-It provides a consistent interface across different authentication flows (confidential client, on‑behalf‑of, etc.), reducing variation in how different parts of the system authenticate
+- It provides a consistent interface across different authentication flows (confidential client, on‑behalf‑of, etc.), reducing variation in how different parts of the system authenticate
 
-It standardises error handling and token validation paths, so authentication behaviour is predictable across environments
+- It standardises error handling and token validation paths, so authentication behaviour is predictable across environments
 
 Server‑side state management in an authentication context means the server holds and tracks all identity‑related state — such as sessions, tokens, and token lifecycles — rather than pushing that responsibility into the browser. The server becomes the authority that stores, refreshes, and validates tokens, while the client simply receives authenticated responses without ever handling or persisting sensitive authentication data itself.
+
+- Keeps all authentication‑related state — such as sessions and tokens — within a controlled server environment
+
+- Removes the need for the browser to store or manage sensitive identity data
+
+- Ensures token refresh, rotation, and lifecycle handling occur in a trusted context
+
+- Centralises validation logic so token integrity checks, expiry handling, and session rules are applied consistently
+
+- Supports secure server‑side OAuth flows where the server acts as the authoritative holder of identity state
+
+- Provides a predictable, uniform mechanism for managing authenticated user context across requests
+
+1. Token Replay Attacks
+Mitigation: Nonce Validation  
+MSAL generates and validates a cryptographically random nonce for each authentication request. The nonce is embedded in the ID token and must match on return, preventing attackers from reusing previously issued tokens.
+
+2. Authorization Code Interception
+Mitigation: PKCE (Proof Key for Code Exchange)  
+MSAL uses PKCE to bind the authorization code to the client instance. Even if an attacker intercepts the code, they cannot exchange it for tokens without the correct code verifier.
+
+3. Cross‑Site Request Forgery (CSRF)
+Mitigation: State Parameter Validation  
+MSAL generates a unique state value for each request and validates it on return. This ensures the response corresponds to the original request and was not initiated by a malicious third party.
+
+4. Token Tampering or Forgery
+Mitigation: Token Signature and Claims Validation  
+MSAL validates token signatures using Azure AD’s public keys and checks critical claims (issuer, audience, expiry). This ensures tokens are authentic, unmodified, and intended for the application.
+
+5. Unauthorized API Access
+Mitigation: Scoped Access Tokens and Consent Enforcement  
+MSAL acquires tokens with explicit scopes, ensuring the client receives only the permissions granted by the user or administrator. This limits the blast radius of compromised tokens.
+
+6. Credential Leakage in Public Clients
+Mitigation: Secure OAuth Flows and No Client Secret Requirement  
+For public clients (desktop, mobile), MSAL uses flows that do not require storing secrets, reducing the risk of credential exposure.
+
+7. Refresh Token Abuse
+Mitigation: Refresh Token Management and Conditional Access Enforcement  
+MSAL handles refresh tokens securely, automatically renewing them and respecting Azure AD policies such as MFA, device compliance, and sign‑in risk. This prevents long‑lived, ungoverned token use.
+
+8. Man‑in‑the‑Middle Attacks During Authentication
+Mitigation: Strict HTTPS Enforcement and Redirect URI Validation  
+MSAL requires HTTPS for all token requests and validates redirect URIs against registered values, preventing interception or redirection to malicious endpoints.
+
+9. Session Fixation or Session Hijacking
+Mitigation: Server‑Side Token Storage (for MSAL‑Node)  
+In server‑side scenarios, MSAL‑Node keeps tokens off the browser entirely, reducing exposure to client‑side attacks such as XSS or storage compromise.
+
+10. Misconfigured or Malicious Identity Providers
+Mitigation: Authority Validation  
+MSAL validates the authority (issuer) against trusted Azure AD endpoints, ensuring tokens are only requested from legitimate identity providers.
 
