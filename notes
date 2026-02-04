@@ -1,130 +1,148 @@
-MSAL‑Node is Microsoft’s official authentication library for Node.js  applications, giving server‑side code a standard way to interact with Azure Active Directory and perform modern authentication flows to obtain the tokens needed for secure, identity‑aware communication with protected services.
+// lib/featureCache.ts
+import { AppConfigurationClient } from "@azure/app-configuration";
 
-- Keeps tokens and authentication state on the server, reducing exposure to client‑side risks
+type CachedEntry = {
+  value: unknown;
+  etag?: string;
+  expiresAt: number;
+};
 
-- Uses secure, server‑side OAuth flows rather than the browser‑focused patterns required by msal.js
+const CONNECTION_STRING = process.env.AZURE_APP_CONFIG_CONNECTION;
+if (!CONNECTION_STRING) {
+  throw new Error("Missing AZURE_APP_CONFIG_CONNECTION env var");
+}
 
-- Avoids storing tokens in browser storage, removing a common security vulnerability
+const client = new AppConfigurationClient(CONNECTION_STRING);
 
-- Centralises session and token lifecycle management in a controlled, trusted environment
+// Configuration
+let CACHE_TTL_MS = 60_000; // default 60 seconds
 
-- Simplifies integration with SSR and BFF architectures where the server is responsible for identity handling
+// Internal state held in module closure
+const cache = new Map<string, CachedEntry>(); // key -> { value, etag, expiresAt }
+const inflight = new Map<string, Promise<unknown>>(); // key -> Promise resolving to value
 
-- Handles key security patterns internally — such as nonce generation, PKCE, state validation, and token integrity checks — so these safeguards are applied consistently and correctly without custom implementation
+async function _fetchFromAppConfig(
+  key: string,
+): Promise<{ value: unknown; etag?: string }> {
+  const setting = await client.getConfigurationSetting({ key });
+  const raw = setting.value;
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : raw;
+  } catch {
+    parsed = raw;
+  }
+  return { value: parsed, etag: setting.etag };
+}
 
-- MSAL‑Node uses Microsoft‑maintained protocol compliance, ensuring its request/response handling stays aligned with Azure AD’s evolving standards
+/**
+ * Get a flag value from cache or App Configuration.
+ * @param key - full App Configuration key, e.g. '.appconfig.featureflag/my-flag'
+ * @returns parsed flag value
+ */
+export async function getFlag(key: string): Promise<unknown> {
+  const now = Date.now();
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
 
-- It abstracts the underlying OAuth/OpenID Connect mechanics so your application doesn’t need to implement low‑level protocol details
+  // Deduplicate concurrent fetches
+  if (inflight.has(key)) {
+    return inflight.get(key)!;
+  }
 
-- It provides a consistent interface across different authentication flows (confidential client, on‑behalf‑of, etc.), reducing variation in how different parts of the system authenticate
+  const p = (async () => {
+    try {
+      const { value, etag } = await _fetchFromAppConfig(key);
 
-- It standardises error handling and token validation paths, so authentication behaviour is predictable across environments
+      // If cached and etag unchanged, just extend TTL
+      const existing = cache.get(key);
+      if (existing && existing.etag === etag) {
+        existing.expiresAt = Date.now() + CACHE_TTL_MS;
+        return existing.value;
+      }
 
-Server‑side state management in an authentication context means the server holds and tracks all identity‑related state — such as sessions, tokens, and token lifecycles — rather than pushing that responsibility into the browser. The server becomes the authority that stores, refreshes, and validates tokens, while the client simply receives authenticated responses without ever handling or persisting sensitive authentication data itself.
+      // Otherwise update cache
+      cache.set(key, { value, etag, expiresAt: Date.now() + CACHE_TTL_MS });
+      return value;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
 
-- Keeps all authentication‑related state — such as sessions and tokens — within a controlled server environment
+  inflight.set(key, p);
+  return p;
+}
 
-- Removes the need for the browser to store or manage sensitive identity data
+/**
+ * Force refresh a key from App Configuration and update cache immediately.
+ * @param key
+ */
+export async function refreshFlag(key: string): Promise<unknown> {
+  // Deduplicate refreshes too
+  if (inflight.has(key)) return inflight.get(key)!;
 
-- Ensures token refresh, rotation, and lifecycle handling occur in a trusted context
+  const p = (async () => {
+    try {
+      const { value, etag } = await _fetchFromAppConfig(key);
+      cache.set(key, { value, etag, expiresAt: Date.now() + CACHE_TTL_MS });
+      return value;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
 
-- Centralises validation logic so token integrity checks, expiry handling, and session rules are applied consistently
+  inflight.set(key, p);
+  return p;
+}
 
-- Supports secure server‑side OAuth flows where the server acts as the authoritative holder of identity state
+/**
+ * Invalidate a cached key so next getFlag will fetch from App Configuration.
+ * @param key
+ */
+export function invalidateFlag(key: string): void {
+  cache.delete(key);
+}
 
-- Provides a predictable, uniform mechanism for managing authenticated user context across requests
+/**
+ * Get all cached keys and values (useful for debugging)
+ */
+export function getAllCached(): Record<string, CachedEntry> {
+  const out: Record<string, CachedEntry> = {};
+  for (const [k, v] of cache.entries()) {
+    out[k] = { value: v.value, etag: v.etag, expiresAt: v.expiresAt };
+  }
+  return out;
+}
 
-1. Token Replay Attacks
-Mitigation: Nonce Validation  
-MSAL generates and validates a cryptographically random nonce for each authentication request. The nonce is embedded in the ID token and must match on return, preventing attackers from reusing previously issued tokens.
+/**
+ * Adjust TTL at runtime
+ * @param ms
+ */
+export function setCacheTTL(ms: number): void {
+  CACHE_TTL_MS = Number(ms) || CACHE_TTL_MS;
+}
 
-2. Authorization Code Interception
-Mitigation: PKCE (Proof Key for Code Exchange)  
-MSAL uses PKCE to bind the authorization code to the client instance. Even if an attacker intercepts the code, they cannot exchange it for tokens without the correct code verifier.
+export async function isEnabled(featureFlag: string): Promise<boolean> {
+  const key = `.appconfig.featureflag/${featureFlag}`;
+  const flag = await getFlag(key);
 
-3. Cross‑Site Request Forgery (CSRF)
-Mitigation: State Parameter Validation  
-MSAL generates a unique state value for each request and validates it on return. This ensures the response corresponds to the original request and was not initiated by a malicious third party.
+  if (flag && typeof flag === "object" && "enabled" in flag) {
+    const f = flag as { enabled?: unknown };
+    return Boolean(f.enabled);
+  }
 
-4. Token Tampering or Forgery
-Mitigation: Token Signature and Claims Validation  
-MSAL validates token signatures using Azure AD’s public keys and checks critical claims (issuer, audience, expiry). This ensures tokens are authentic, unmodified, and intended for the application.
+  return false;
+}
 
-5. Unauthorized API Access
-Mitigation: Scoped Access Tokens and Consent Enforcement  
-MSAL acquires tokens with explicit scopes, ensuring the client receives only the permissions granted by the user or administrator. This limits the blast radius of compromised tokens.
-
-6. Credential Leakage in Public Clients
-Mitigation: Secure OAuth Flows and No Client Secret Requirement  
-For public clients (desktop, mobile), MSAL uses flows that do not require storing secrets, reducing the risk of credential exposure.
-
-7. Refresh Token Abuse
-Mitigation: Refresh Token Management and Conditional Access Enforcement  
-MSAL handles refresh tokens securely, automatically renewing them and respecting Azure AD policies such as MFA, device compliance, and sign‑in risk. This prevents long‑lived, ungoverned token use.
-
-8. Man‑in‑the‑Middle Attacks During Authentication
-Mitigation: Strict HTTPS Enforcement and Redirect URI Validation  
-MSAL requires HTTPS for all token requests and validates redirect URIs against registered values, preventing interception or redirection to malicious endpoints.
-
-9. Session Fixation or Session Hijacking
-Mitigation: Server‑Side Token Storage (for MSAL‑Node)  
-In server‑side scenarios, MSAL‑Node keeps tokens off the browser entirely, reducing exposure to client‑side attacks such as XSS or storage compromise.
-
-10. Misconfigured or Malicious Identity Providers
-Mitigation: Authority Validation  
-MSAL validates the authority (issuer) against trusted Azure AD endpoints, ensuring tokens are only requested from legitimate identity providers.
-
-1. Session Hijacking
-Mitigation: HTTP‑Only, Secure Cookies  
-Cookies are marked as HttpOnly and Secure, preventing JavaScript access and ensuring they are only transmitted over HTTPS. This blocks theft via XSS and network sniffing.
-
-2. Cross‑Site Request Forgery (CSRF)
-Mitigation: State/Anti‑Forgery Tokens  
-A cryptographically random value is stored server‑side and embedded in the client request. The server validates it on return, ensuring the request originated from the legitimate session.
-
-3. Session Fixation
-Mitigation: Session Regeneration on Login  
-A new session identifier is issued after authentication, preventing attackers from forcing a victim to use a known session ID.
-
-4. Session Replay
-Mitigation: Short‑Lived Session IDs + Rotation  
-Session identifiers are time‑bounded and rotated periodically, reducing the usefulness of any intercepted session token.
-
-5. Cookie Theft via XSS
-Mitigation: SameSite=Lax/Strict + HttpOnly  
-SameSite prevents cross‑site cookie sending, and HttpOnly prevents script access. Together they significantly reduce the attack surface for cookie exfiltration.
-
-6. Man‑in‑the‑Middle Attacks
-Mitigation: TLS Enforcement  
-All session cookies and state values are transmitted only over HTTPS, preventing interception or modification in transit.
-
-7. Tampering with State Values
-Mitigation: Server‑Side Storage of State  
-State values are stored server‑side (session, cache, DB) rather than trusting client‑provided values. The client only holds a reference, not the authoritative data.
-
-8. Over‑Privileged Session Data
-Mitigation: Minimal Session Surface Area  
-Only essential data (e.g., MSAL state, correlation IDs, user ID) is stored. No tokens, secrets, or sensitive data are placed in the session, reducing blast radius.
-
-9. Session Enumeration or Guessing
-Mitigation: Cryptographically Strong Session IDs  
-Session identifiers are long, random, and unguessable, preventing brute‑force discovery of valid sessions.
-
-10. Stale or Orphaned Sessions
-Mitigation: Idle Timeout + Absolute Timeout  
-Sessions expire after inactivity and after a maximum lifetime, reducing exposure from abandoned or forgotten sessions.
-
-1. Cookie Theft via XSS
-Mitigation: HttpOnly Cookies  
-Marking cookies as HttpOnly: true prevents JavaScript from reading them, blocking attackers from stealing session identifiers through injected scripts.
-
-2. Cookie Interception on the Network
-Mitigation: Secure Cookies  
-Setting Secure: true ensures cookies are only transmitted over HTTPS, preventing exposure to network sniffing or man‑in‑the‑middle interception.
-
-3. Cross‑Site Request Forgery (CSRF)
-Mitigation: SameSite=Lax  
-SameSite: 'lax' stops browsers from sending cookies on most cross‑site requests, significantly reducing CSRF risk while still allowing top‑level navigation flows (e.g., OAuth redirects).
-
-Future Direction: Migration from Azure AD B2C to Entra External ID
-Azure AD B2C is now in a long‑term maintenance posture, and Microsoft’s strategic direction is Entra External ID. A future migration is therefore expected for support and lifecycle reasons. From a security perspective, Entra enables Proof‑of‑Possession (PoP) / Demonstration‑of‑Proof‑of‑Possession (DPoP) tokens, which bind tokens to the client and prevent replay attacks. While token interception is already extremely unlikely in a corporate environment—typically only possible through significant human error or compromised devices—PoP/DPoP closes that final theoretical gap and brings the model to full modern standards.
+// Export default convenience that exposes getFlag
+const defaultExport = {
+  getFlag,
+  refreshFlag,
+  invalidateFlag,
+  getAllCached,
+  setCacheTTL,
+  isEnabled,
+};
+export default defaultExport;
