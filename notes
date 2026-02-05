@@ -22,15 +22,23 @@ const inflight = new Map<string, Promise<unknown>>();
 async function _fetchFromAppConfig(
   key: string,
 ): Promise<{ value: unknown; etag?: string }> {
-  const setting = await client.getConfigurationSetting({ key });
-  const raw = setting.value;
-  let parsed: unknown;
   try {
-    parsed = raw ? JSON.parse(raw) : raw;
-  } catch {
-    parsed = raw;
+    const setting = await client.getConfigurationSetting({ key });
+    const raw = setting.value;
+    let parsed: unknown;
+    try {
+      parsed = raw ? JSON.parse(raw) : raw;
+    } catch {
+      parsed = raw;
+    }
+    return { value: parsed, etag: setting.etag };
+  } catch (err: any) {
+    // Azure App Config returns 404 when the key does not exist
+    if (err.statusCode === 404) {
+      return { value: undefined, etag: undefined };
+    }
+    throw err;
   }
-  return { value: parsed, etag: setting.etag };
 }
 
 async function getFlag(key: string): Promise<unknown> {
