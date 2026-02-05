@@ -7,19 +7,17 @@ type CachedEntry = {
   expiresAt: number;
 };
 
-const CONNECTION_STRING = process.env.AZURE_APP_CONFIG_CONNECTION;
+const CONNECTION_STRING = "Endpoint=https://contactcentre-dev-d190-appcfg.azconfig.io;Id=0;Secret=0";
 if (!CONNECTION_STRING) {
   throw new Error("Missing AZURE_APP_CONFIG_CONNECTION env var");
 }
 
 const client = new AppConfigurationClient(CONNECTION_STRING);
 
-// Configuration
-let CACHE_TTL_MS = 60_000; // default 60 seconds
+let CACHE_TTL_MS = 300_000; // default 300 seconds
 
-// Internal state held in module closure
-const cache = new Map<string, CachedEntry>(); // key -> { value, etag, expiresAt }
-const inflight = new Map<string, Promise<unknown>>(); // key -> Promise resolving to value
+const cache = new Map<string, CachedEntry>();
+const inflight = new Map<string, Promise<unknown>>();
 
 async function _fetchFromAppConfig(
   key: string,
@@ -35,12 +33,7 @@ async function _fetchFromAppConfig(
   return { value: parsed, etag: setting.etag };
 }
 
-/**
- * Get a flag value from cache or App Configuration.
- * @param key - full App Configuration key, e.g. '.appconfig.featureflag/my-flag'
- * @returns parsed flag value
- */
-export async function getFlag(key: string): Promise<unknown> {
+async function getFlag(key: string): Promise<unknown> {
   const now = Date.now();
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -56,14 +49,12 @@ export async function getFlag(key: string): Promise<unknown> {
     try {
       const { value, etag } = await _fetchFromAppConfig(key);
 
-      // If cached and etag unchanged, just extend TTL
       const existing = cache.get(key);
       if (existing && existing.etag === etag) {
         existing.expiresAt = Date.now() + CACHE_TTL_MS;
         return existing.value;
       }
 
-      // Otherwise update cache
       cache.set(key, { value, etag, expiresAt: Date.now() + CACHE_TTL_MS });
       return value;
     } finally {
@@ -75,56 +66,7 @@ export async function getFlag(key: string): Promise<unknown> {
   return p;
 }
 
-/**
- * Force refresh a key from App Configuration and update cache immediately.
- * @param key
- */
-export async function refreshFlag(key: string): Promise<unknown> {
-  // Deduplicate refreshes too
-  if (inflight.has(key)) return inflight.get(key)!;
-
-  const p = (async () => {
-    try {
-      const { value, etag } = await _fetchFromAppConfig(key);
-      cache.set(key, { value, etag, expiresAt: Date.now() + CACHE_TTL_MS });
-      return value;
-    } finally {
-      inflight.delete(key);
-    }
-  })();
-
-  inflight.set(key, p);
-  return p;
-}
-
-/**
- * Invalidate a cached key so next getFlag will fetch from App Configuration.
- * @param key
- */
-export function invalidateFlag(key: string): void {
-  cache.delete(key);
-}
-
-/**
- * Get all cached keys and values (useful for debugging)
- */
-export function getAllCached(): Record<string, CachedEntry> {
-  const out: Record<string, CachedEntry> = {};
-  for (const [k, v] of cache.entries()) {
-    out[k] = { value: v.value, etag: v.etag, expiresAt: v.expiresAt };
-  }
-  return out;
-}
-
-/**
- * Adjust TTL at runtime
- * @param ms
- */
-export function setCacheTTL(ms: number): void {
-  CACHE_TTL_MS = Number(ms) || CACHE_TTL_MS;
-}
-
-export async function isEnabled(featureFlag: string): Promise<boolean> {
+export async function featureFlagEnabled(featureFlag: string): Promise<boolean> {
   const key = `.appconfig.featureflag/${featureFlag}`;
   const flag = await getFlag(key);
 
@@ -135,14 +77,3 @@ export async function isEnabled(featureFlag: string): Promise<boolean> {
 
   return false;
 }
-
-// Export default convenience that exposes getFlag
-const defaultExport = {
-  getFlag,
-  refreshFlag,
-  invalidateFlag,
-  getAllCached,
-  setCacheTTL,
-  isEnabled,
-};
-export default defaultExport;
